@@ -1,15 +1,16 @@
 ---
-title: "Applications of functional programming in R"
+title: "The tidyverse and functional programming in R"
 output: 
   ioslides_presentation:
-    widescreen: true
+    widescreen: TRUE
 ---
 
 ```{r setup, include=FALSE}
-    # smaller: true
+    # smaller: TRUE # YAML header option for making text smaller, defaults to false
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+<!-- HTML to enable scrolling in slides -->
 <style>
 slides > slide {
   overflow-x: auto !important;
@@ -20,9 +21,92 @@ slides > slide {
 
 ## Load a couple libraries
 ```{r, message=F}
-library(tidyverse)
+library(tidyverse) 
 library(glue) # similar to paste() but more powerful
 ```
+
+All of the ideas in this talk come from other people, primarily the *R for Data Science* iteration chapter.
+
+
+https://r4ds.had.co.nz/iteration.html
+
+
+## R lets you create tools that work the way you want them to
+
+For example you can define a new ifelse function that treats NA like any other value.
+
+```{r}
+ifelse2 <- function(test, yes, no) ifelse(!is.na(test) & test, yes, no)
+
+tibble(age = c(0, NA, 5, 15, 21, 35)) %>% 
+  mutate(ifelse  =  ifelse(age < 18, "Minor", "Adult"),  # Base R version
+         ifelse2 = ifelse2(age < 18, "Minor", "Adult"),  # My custom version
+         if_else = if_else(age < 18, "Minor", "Adult"))  # Tidyverse version
+```
+
+
+## The tidyverse developers have re-implemented a lot of base R functionality
+
+if_else has an argument for explicit NA handling
+
+```{r}
+tibble(age = c(0, NA, 5, 15, 21, 35)) %>% 
+  mutate(ifelse  =  ifelse(age < 18, "Minor", "Adult"),
+         ifelse2 = ifelse2(age < 18, "Minor", "Adult"),  
+         if_else = if_else(age < 18, "Minor", "Adult", missing = "We don't know"))
+
+```
+
+
+
+## Strangely, case_when treats NA like any other value
+
+```{r}
+tibble(age = c(0, NA, 5, 15, 21, 35)) %>% 
+  mutate(case_when = case_when(
+    age < 1 ~ "Baby",     
+    age < 18 ~ "Minor",
+    T ~ "Adult"))
+
+tibble(age = c(0, NA, 5, 15, 21, 35)) %>% 
+  mutate(case_when = case_when(
+    age < 1 ~ "Baby",     
+    age < 18 ~ "Minor",
+    is.na(age) ~ "We don't know",
+    T ~ "Adult"))
+```
+
+
+## The tidyverse functions tend to be more strict than base R
+
+```{r, error=T}
+ifelse(1:6 > 3, ">3", c("less", "than 3"))
+ifelse(1:6 > 3, ">3", 4)
+if_else(1:6 > 3, ">3", c("less", "than 3"))
+if_else(1:6 > 3, ">3", 4)
+```
+
+## However this strictness has consequences
+
+```{r, error=T}
+if_else(1:6 > 3, ">3", NA)
+typeof(NA)
+if_else(1:6 > 3, ">3", NA_character_)
+```
+
+
+## There are lots of convenience functions in the tidyverse
+
+`complete()` makes implicit missing values explicit by filling in missing combinations.
+
+```{r}
+
+tibble(patkey = 1:3, visit_number = 1:3) %>% 
+  complete(patkey, visit_number)
+
+```
+
+
 
 
 ## Create some fake visit data
@@ -48,6 +132,7 @@ visit_wide <- map(1:nvisits, create_visit_df) %>%
 
 ```
 
+
 ## One row per patient with grouped columns
 
 ```{r, echo=F, out.width=20}
@@ -57,6 +142,8 @@ DT::datatable(visit_wide)
 
 ## The goal: One row per visit
 ```{r, echo=F, out.width=2}
+# the echo=F chunk option supresses printing of the code to the slide. The code still runs and the output is inlcuded though.
+
 map(1:nvisits, ~select(visit_wide, patid, ends_with(glue("_{.}")))) %>% 
   map_dfr(~rename_all(., ~str_remove(., "_[:digit:]+$"))) %>% 
   arrange(patid) #%>% 
@@ -76,6 +163,8 @@ knitr::include_graphics("grouped_transposition.gif")
 In computer science, a list or sequence is an abstract data type that represents a countable number of ordered values, where the same value may occur more than once.
 
 https://en.wikipedia.org/wiki/List_(abstract_data_type)
+
+Basically it is just a container.
 
 ## Lists can contain anything
 
@@ -133,7 +222,7 @@ map(numeric_list, function(x) sqrt(sum(x^2)))
 
 ## Use the ~ . shortcut to create a custom function on the fly
 
-This shortcut only works in the tidyverse
+This shortcut only works in the tidyverse.
 
 ```{r}
 numeric_list <- list(1:3, 4:10, seq(0, 20, by = 2))
@@ -186,7 +275,8 @@ map_chr(1:3, ~glue("_{.}"))
 knitr::include_graphics("map_reduce_animation.gif")
 ```
 
-## Ok.. Back to the problem at hand
+
+## Back to the problem at hand
 
 We can easily select all variables for one visit
 
@@ -194,13 +284,15 @@ We can easily select all variables for one visit
 select(visit_wide, patid, ends_with("_1"))
 ```
 
+```{r}
+
+```
+
 
 
 ## Split the dataframe into a list of dataframes
 
 ```{r}
-
-
 df_list <- map(1:nvisits, ~select(visit_wide, patid, ends_with(glue("_{.}"))))
 
 str(df_list, max.level = 1)
@@ -239,13 +331,22 @@ reduce(df_list2, bind_rows)
 
 ```{r}
 map(1:nvisits, ~select(visit_wide, patid, ends_with(glue("_{.}")))) %>% 
-  map(~rename_all(., ~str_remove(., "_.$"))) %>% 
+  map(~rename_all(., ~str_remove(., "_[:digit:]+$"))) %>% 
   reduce(bind_rows)
 
 ```
 
+## And since bind_rows will accept a list we don't even need reduce in this example
 
-## Using one of the map variants we can do it in two lines
+```{r}
+map(1:nvisits, ~select(visit_wide, patid, ends_with(glue("_{.}")))) %>% 
+  map(~rename_all(., ~str_remove(., "_[:digit:]+$"))) %>% 
+  bind_rows()
+
+```
+
+
+## Using the map_dfr variant we can do it in two lines
 
 ```{r}
 map(1:nvisits, ~select(visit_wide, patid, ends_with(glue("_{.}")))) %>% 
@@ -254,9 +355,26 @@ map(1:nvisits, ~select(visit_wide, patid, ends_with(glue("_{.}")))) %>%
 ```
 
 
+## Add a visit number column
+
+map2 is similar to map but loops over two arguments .x and .y in parallel.
+
+In this case we are looping over our datafame list and the numbers 1 to `r nvisits`.
+
+```{r}
+
+map(1:nvisits, ~select(visit_wide, patid, ends_with(glue("_{.}")))) %>% 
+  map2(1:nvisits, ~mutate(.x, visit_number = .y)) %>% 
+  map_dfr(~rename_all(., ~str_remove(., "_[:digit:]+$"))) 
+
+
+```
+
+
 ## It even works with a database
 
 Create a SQLite database in memory and load our visit data into it
+
 ```{r}
 library(DBI)
 con <- dbConnect(RSQLite::SQLite(), ":memory:")
@@ -286,11 +404,11 @@ map(1:nvisits, ~select(visit_db, patid, ends_with(glue("_{.}")))) %>%
   show_query()
 ```
 
-## The takeaway
+## The main takeaway
 
-The map and reduce functions allow us to program on a higher level of abstraction.
+The map and reduce functions allow us to program on a higher level of abstraction. As the number of visits increases SQL requires more code while the R code does not need to change. `map` and `reduce` basically just write `for` loops for you.
 
-The scoped variants of dplyr work much the same way.
+We can think of the scoped variants of dplyr in much the same way.
 
 ```{r, eval = F}
 mutate_if(); mutate_at(); mutate_all()
@@ -302,9 +420,65 @@ summarise_if(); summarise_at(); summarise_all()
 
 These functions map over a dataframe which is a list of columns.
 
+
+## Extensions: Functions as data
+
+```{r}
+lst(min, mean, median, max, sd) %>% 
+  map_dfr(~map(mtcars, .), .id = "summary")
+
+```
+
+This works because a dataframe is a list. It is a list of columns.
+
 ```{r}
 is.list(mtcars)
 ```
+
+
+
+## Extensions: List-columns in a dataframe
+
+
+Since list can contain other lists we can put anything inside a dataframe as a list column.
+
+Here we split the mtcars dataframe by the cyl variable and fit a linear model to each subset. Then we pull out the $R^2$ value from each model.
+
+```{r}
+model_df <- mtcars %>% 
+  nest(data = -cyl) %>% 
+  mutate(model = map(data, ~lm(mpg ~ ., data = .))) %>% 
+  mutate(r_squared = map_dbl(model, ~summary(.)$r.squared))
+
+model_df
+```
+
+
+## Extensions: Many models idea from R4ds
+
+We can permanently save all our models and data in a single object.
+
+```{r, eval=F}
+write_rds(model_df, "model_df.rds")
+```
+
+
+The dataframe then becomes a more general data structure to store like objects together on a single row. Not every problem or analysis should be fit into this framework but it is a powerful concept that applies to many problems analysts face.
+
+https://r4ds.had.co.nz/many-models.html
+
+
+## Could this transposition have been done with pivot_longer() or gather()?
+
+I don't think so since `pivot_longer` and `gather` take many columns and collapse then into one column. Here we have columns of different types that can't easily be put into a single column. I could be wrong though!
+
+```{r, error=T}
+
+visit_wide %>% 
+  pivot_longer(cols = -patid)
+
+```
+
 
 
 ```{r, include=F}
